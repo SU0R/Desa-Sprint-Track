@@ -1,23 +1,13 @@
 import Link from 'next/link';
 import {
+  Activity,
+  ArrowRightLeft,
+  Gauge,
   Home,
-  LineChart,
-  Package,
-  Package2,
   PanelLeft,
-  Settings,
-  ShoppingCart,
-  Users2
+  Timer
 } from 'lucide-react';
 
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator
-} from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -25,12 +15,10 @@ import {
   TooltipContent,
   TooltipTrigger
 } from '@/components/ui/tooltip';
-import { Analytics } from '@vercel/analytics/react';
-import { User } from './user';
-import { VercelLogo } from '@/components/icons';
 import Providers from './providers';
 import { NavItem } from './nav-item';
-import { SearchInput } from './search';
+import { SprintTrackerProvider } from '@/hooks/use-sprint-tracker-store';
+import { Badge } from '@/components/ui/badge';
 
 export default function DashboardLayout({
   children
@@ -39,69 +27,82 @@ export default function DashboardLayout({
 }) {
   return (
     <Providers>
-      <main className="flex min-h-screen w-full flex-col bg-muted/40">
-        <DesktopNav />
-        <div className="flex flex-col sm:gap-4 sm:py-4 sm:pl-14">
-          <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
-            <MobileNav />
-            <DashboardBreadcrumb />
-            <SearchInput />
-            <User />
-          </header>
-          <main className="grid flex-1 items-start gap-2 p-4 sm:px-6 sm:py-0 md:gap-4 bg-muted/40">
-            {children}
-          </main>
-        </div>
-        <Analytics />
-      </main>
+      <SprintTrackerProvider>
+        <main className="flex min-h-screen w-full flex-col bg-background">
+          <DesktopNav />
+          <div className="flex min-h-screen flex-col sm:pl-16">
+            <header className="sticky top-0 z-30 border-b border-white/5 bg-background/85 backdrop-blur">
+              <div className="flex h-16 items-center gap-4 px-4 sm:px-6">
+                <MobileNav />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs uppercase tracking-[0.35em] text-primary">
+                    Sprint Tracker
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h1 className="text-2xl font-semibold text-white">
+                      Build speed with clean sessions and believable timing.
+                    </h1>
+                    <Badge
+                      variant="outline"
+                      className="border-primary/35 bg-primary/10 text-primary"
+                    >
+                      Local-first v1
+                    </Badge>
+                  </div>
+                </div>
+                <Link href="/sessions/new">
+                  <Button className="hidden sm:inline-flex">New Session</Button>
+                </Link>
+              </div>
+            </header>
+            <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
+          </div>
+        </main>
+      </SprintTrackerProvider>
     </Providers>
   );
 }
 
 function DesktopNav() {
   return (
-    <aside className="fixed inset-y-0 left-0 z-10 hidden w-14 flex-col border-r bg-background sm:flex">
-      <nav className="flex flex-col items-center gap-4 px-2 sm:py-5">
+    <aside className="glass-panel fixed inset-y-0 left-0 z-10 hidden w-16 flex-col border-r border-white/5 sm:flex">
+      <nav className="flex flex-col items-center gap-4 px-2 py-5">
         <Link
-          href="https://vercel.com/templates/next.js/admin-dashboard-tailwind-postgres-react-nextjs"
-          className="group flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-full bg-primary text-lg font-semibold text-primary-foreground md:h-8 md:w-8 md:text-base"
+          href="/"
+          className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-lg font-semibold text-primary-foreground"
         >
-          <VercelLogo className="h-3 w-3 transition-all group-hover:scale-110" />
-          <span className="sr-only">Acme Inc</span>
+          <Activity className="h-5 w-5 transition-transform group-hover:scale-110" />
+          <span className="sr-only">Sprint Tracker home</span>
         </Link>
 
-        <NavItem href="#" label="Dashboard">
+        <NavItem href="/" label="Dashboard">
           <Home className="h-5 w-5" />
         </NavItem>
 
-        <NavItem href="#" label="Orders">
-          <ShoppingCart className="h-5 w-5" />
+        <NavItem href="/sessions/new" label="New Session">
+          <Gauge className="h-5 w-5" />
         </NavItem>
 
-        <NavItem href="/" label="Products">
-          <Package className="h-5 w-5" />
+        <NavItem href="/timer" label="Timer">
+          <Timer className="h-5 w-5" />
         </NavItem>
 
-        <NavItem href="/customers" label="Customers">
-          <Users2 className="h-5 w-5" />
-        </NavItem>
-
-        <NavItem href="#" label="Analytics">
-          <LineChart className="h-5 w-5" />
+        <NavItem href="/rooms" label="Rooms">
+          <ArrowRightLeft className="h-5 w-5" />
         </NavItem>
       </nav>
-      <nav className="mt-auto flex flex-col items-center gap-4 px-2 sm:py-5">
+      <nav className="mt-auto flex flex-col items-center gap-4 px-2 py-5">
         <Tooltip>
           <TooltipTrigger asChild>
             <Link
-              href="#"
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground md:h-8 md:w-8"
+              href="/timer"
+              className="flex h-10 w-10 items-center justify-center rounded-2xl text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
             >
-              <Settings className="h-5 w-5" />
-              <span className="sr-only">Settings</span>
+              <Timer className="h-5 w-5" />
+              <span className="sr-only">Open timer prototype</span>
             </Link>
           </TooltipTrigger>
-          <TooltipContent side="right">Settings</TooltipContent>
+          <TooltipContent side="right">Timer prototype</TooltipContent>
         </Tooltip>
       </nav>
     </aside>
@@ -112,81 +113,57 @@ function MobileNav() {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button size="icon" variant="outline" className="sm:hidden">
+        <Button
+          size="icon"
+          variant="outline"
+          className="border-white/10 bg-white/5 sm:hidden"
+        >
           <PanelLeft className="h-5 w-5" />
           <span className="sr-only">Toggle Menu</span>
         </Button>
       </SheetTrigger>
-      <SheetContent side="left" className="sm:max-w-xs">
+      <SheetContent
+        side="left"
+        className="glass-panel border-white/10 bg-background/95 sm:max-w-xs"
+      >
         <nav className="grid gap-6 text-lg font-medium">
           <Link
-            href="#"
-            className="group flex h-10 w-10 shrink-0 items-center justify-center gap-2 rounded-full bg-primary text-lg font-semibold text-primary-foreground md:text-base"
+            href="/"
+            className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-lg font-semibold text-primary-foreground"
           >
-            <Package2 className="h-5 w-5 transition-all group-hover:scale-110" />
-            <span className="sr-only">Vercel</span>
+            <Activity className="h-5 w-5 transition-transform group-hover:scale-110" />
+            <span className="sr-only">Sprint Tracker</span>
           </Link>
           <Link
-            href="#"
-            className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground"
+            href="/"
+            className="flex items-center gap-4 px-2.5 text-foreground"
           >
             <Home className="h-5 w-5" />
             Dashboard
           </Link>
           <Link
-            href="#"
+            href="/sessions/new"
             className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground"
           >
-            <ShoppingCart className="h-5 w-5" />
-            Orders
+            <Gauge className="h-5 w-5" />
+            New Session
           </Link>
           <Link
-            href="#"
-            className="flex items-center gap-4 px-2.5 text-foreground"
-          >
-            <Package className="h-5 w-5" />
-            Products
-          </Link>
-          <Link
-            href="#"
+            href="/timer"
             className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground"
           >
-            <Users2 className="h-5 w-5" />
-            Customers
+            <Timer className="h-5 w-5" />
+            Timer
           </Link>
           <Link
-            href="#"
+            href="/rooms"
             className="flex items-center gap-4 px-2.5 text-muted-foreground hover:text-foreground"
           >
-            <LineChart className="h-5 w-5" />
-            Settings
+            <ArrowRightLeft className="h-5 w-5" />
+            Rooms
           </Link>
         </nav>
       </SheetContent>
     </Sheet>
-  );
-}
-
-function DashboardBreadcrumb() {
-  return (
-    <Breadcrumb className="hidden md:flex">
-      <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link href="#">Dashboard</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link href="#">Products</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbPage>All Products</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
   );
 }

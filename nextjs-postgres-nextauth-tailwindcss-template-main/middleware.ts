@@ -1,6 +1,5 @@
-export { auth as middleware } from '@/lib/auth';
+import { NextResponse } from 'next/server';
 
-// Don't invoke Middleware on some paths
-export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)']
-};
+export function middleware() {
+  return NextResponse.next();
+}

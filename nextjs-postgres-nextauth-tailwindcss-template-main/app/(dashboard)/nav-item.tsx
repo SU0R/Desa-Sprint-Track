@@ -26,9 +26,12 @@ export function NavItem({
         <Link
           href={href}
           className={clsx(
-            'flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground md:h-8 md:w-8',
+            'flex h-10 w-10 items-center justify-center rounded-2xl text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground',
             {
-              'bg-accent text-black': pathname === href
+              'bg-primary text-black shadow-[0_0_24px_rgba(43,214,122,0.2)]':
+                href === '/'
+                  ? pathname === href
+                  : pathname === href || pathname.startsWith(`${href}/`)
             }
           )}
         >
