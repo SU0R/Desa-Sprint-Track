@@ -17,10 +17,11 @@ import { BasicTimingEngine } from '@/services/timing/timing-engine';
 import { formatSeconds } from '@/lib/format';
 
 type PrepOption = '10' | '20' | '30' | '40' | 'random-30-40';
-type TimerPhase = 'idle' | 'countdown' | 'running' | 'finished';
+type TimerPhase = 'idle' | 'countdown' | 'cue' | 'running' | 'finished';
 
 const FINISH_MARKER_POSITION = 0.72;
 const START_CUE_SRC = '/sounds/start-cue.mp4';
+const START_CUE_GUN_OFFSET_MS = 4300;
 
 const PREP_OPTIONS: Array<{
   value: PrepOption;
@@ -57,6 +58,7 @@ const PREP_OPTIONS: Array<{
 export function TimerPrototypePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const startTimeoutRef = useRef<number | null>(null);
+  const gunStartTimeoutRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const startCueRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -97,6 +99,11 @@ export function TimerPrototypePage() {
     if (countdownIntervalRef.current !== null) {
       window.clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
+    }
+
+    if (gunStartTimeoutRef.current !== null) {
+      window.clearTimeout(gunStartTimeoutRef.current);
+      gunStartTimeoutRef.current = null;
     }
   }
 
@@ -230,7 +237,8 @@ export function TimerPrototypePage() {
     (option) => option.value === prepOption
   );
   const isRandomStart = prepOption === 'random-30-40';
-  const canStart = phase !== 'countdown' && phase !== 'running';
+  const canStart =
+    phase !== 'countdown' && phase !== 'cue' && phase !== 'running';
 
   const startRun = () => {
     const runId = runIdRef.current + 1;
@@ -300,16 +308,29 @@ export function TimerPrototypePage() {
 
     startTimeoutRef.current = window.setTimeout(() => {
       clearStartDelay();
-      setPhase('running');
+      setPhase('cue');
       setRemainingPrepSeconds(0);
-      engine.reset();
-      engine.start();
       playStartCue();
-      setLastTrigger('Start cue played. Timer is running.');
+      setLastTrigger(
+        'Start cue playing. Timer will start on the gunshot in 4.3 seconds.'
+      );
 
-      if (mode === 'camera' && videoRef.current) {
-        void startFinishDetection(runId, videoRef.current);
-      }
+      gunStartTimeoutRef.current = window.setTimeout(() => {
+        gunStartTimeoutRef.current = null;
+
+        if (runIdRef.current !== runId) {
+          return;
+        }
+
+        setPhase('running');
+        engine.reset();
+        engine.start();
+        setLastTrigger('Gunshot reached. Timer is running.');
+
+        if (mode === 'camera' && videoRef.current) {
+          void startFinishDetection(runId, videoRef.current);
+        }
+      }, START_CUE_GUN_OFFSET_MS);
     }, prepSeconds * 1000);
   };
 
@@ -317,6 +338,10 @@ export function TimerPrototypePage() {
     runIdRef.current += 1;
     clearStartDelay();
     stopDetector();
+    startCueRef.current?.pause();
+    if (startCueRef.current) {
+      startCueRef.current.currentTime = 0;
+    }
     engine.reset();
     setPhase('idle');
     setRemainingPrepSeconds(0);
@@ -404,6 +429,15 @@ export function TimerPrototypePage() {
                     {remainingPrepSeconds}s
                   </p>
                 )
+              ) : phase === 'cue' ? (
+                <div className="mt-4 space-y-3">
+                  <p className="text-4xl font-semibold text-white md:text-5xl">
+                    Get set
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Timer starts on the gunshot.
+                  </p>
+                </div>
               ) : (
                 <p className="mt-4 text-6xl font-semibold text-white md:text-7xl">
                   {formatSeconds(elapsed)}
@@ -435,6 +469,8 @@ export function TimerPrototypePage() {
               <p className="mt-2 text-sm text-muted-foreground">
                 {phase === 'countdown' && isRandomStart
                   ? 'The exact start time is hidden. Wait for the tone.'
+                  : phase === 'cue'
+                    ? 'The cue is playing. The stopwatch starts at the gunshot.'
                   : selectedPrepOption?.description}
               </p>
             </div>
