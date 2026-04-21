@@ -8,11 +8,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useSprintTrackerStore } from '@/hooks/use-sprint-tracker-store';
 import { createBrowserCameraService } from '@/services/camera/camera-service';
+import {
+  MotionBandFinishLineDetector,
+  type FinishLineCalibration,
+  type FinishLineDetectionResult
+} from '@/services/camera/finish-line-detector';
 import { BasicTimingEngine } from '@/services/timing/timing-engine';
 import { formatSeconds } from '@/lib/format';
 
 type PrepOption = '10' | '20' | '30' | '40' | 'random-30-40';
 type TimerPhase = 'idle' | 'countdown' | 'running' | 'finished';
+
+const FINISH_MARKER_POSITION = 0.72;
 
 const PREP_OPTIONS: Array<{
   value: PrepOption;
@@ -51,6 +58,13 @@ export function TimerPrototypePage() {
   const startTimeoutRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const detectorRef = useRef<MotionBandFinishLineDetector | null>(null);
+  const calibrationRef = useRef<FinishLineCalibration | null>(null);
+  const calibrationPromiseRef = useRef<Promise<FinishLineCalibration | null> | null>(
+    null
+  );
+  const runIdRef = useRef(0);
+  const elapsedRef = useRef(0);
   const [status, setStatus] = useState('Idle');
   const [elapsed, setElapsed] = useState(0);
   const [mode, setMode] = useState<'manual' | 'camera'>('manual');
@@ -61,6 +75,11 @@ export function TimerPrototypePage() {
   const [cameraState, setCameraState] = useState<
     'idle' | 'requesting' | 'granted' | 'blocked'
   >('idle');
+  const [detectorStatus, setDetectorStatus] = useState(
+    'Camera finish detection is idle.'
+  );
+  const [lastDetection, setLastDetection] =
+    useState<FinishLineDetectionResult | null>(null);
   const [lastTrigger, setLastTrigger] = useState('Waiting for finish trigger');
   const { sessions, addAttempt } = useSprintTrackerStore();
 
@@ -77,6 +96,24 @@ export function TimerPrototypePage() {
       window.clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
     }
+  }
+
+  function getDetector() {
+    if (!detectorRef.current) {
+      detectorRef.current = new MotionBandFinishLineDetector({
+        markerPosition: FINISH_MARKER_POSITION,
+        sampleIntervalMs: 45,
+        consecutiveDetections: 2
+      });
+    }
+
+    return detectorRef.current;
+  }
+
+  function stopDetector() {
+    detectorRef.current?.stop();
+    calibrationRef.current = null;
+    calibrationPromiseRef.current = null;
   }
 
   function primeStartTone() {
@@ -112,6 +149,7 @@ export function TimerPrototypePage() {
 
   useEffect(() => {
     return engine.subscribe((snapshot) => {
+      elapsedRef.current = snapshot.elapsedMs / 1000;
       setElapsed(snapshot.elapsedMs / 1000);
       setStatus(snapshot.status);
 
@@ -123,7 +161,9 @@ export function TimerPrototypePage() {
 
   useEffect(() => {
     return () => {
+      runIdRef.current += 1;
       clearStartDelay();
+      stopDetector();
       audioContextRef.current?.close();
       audioContextRef.current = null;
     };
@@ -171,8 +211,12 @@ export function TimerPrototypePage() {
   const canStart = phase !== 'countdown' && phase !== 'running';
 
   const startRun = () => {
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
     clearStartDelay();
+    stopDetector();
     engine.reset();
+    setLastDetection(null);
 
     const prepSeconds =
       prepOption === 'random-30-40'
@@ -190,6 +234,41 @@ export function TimerPrototypePage() {
         : `${prepSeconds}-second setup timer started.`
     );
 
+    if (mode === 'camera' && cameraState === 'granted' && videoRef.current) {
+      const calibrationDuration = Math.min(
+        5000,
+        Math.max(1500, prepSeconds * 1000 - 1000)
+      );
+
+      setDetectorStatus('Calibrating finish-line motion during setup.');
+      calibrationPromiseRef.current = getDetector()
+        .calibrate(videoRef.current, calibrationDuration)
+        .then((calibration) => {
+          if (runIdRef.current !== runId) {
+            return null;
+          }
+
+          calibrationRef.current = calibration;
+          setDetectorStatus(
+            `Ready: threshold ${calibration.threshold} from ${calibration.samples} samples.`
+          );
+          return calibration;
+        })
+        .catch(() => {
+          if (runIdRef.current === runId) {
+            setDetectorStatus('Calibration failed. Use manual finish trigger.');
+          }
+
+          return null;
+        });
+    } else {
+      setDetectorStatus(
+        mode === 'camera'
+          ? 'Camera is not ready, so manual finish trigger is still available.'
+          : 'Manual mode selected. Use the finish trigger button to stop.'
+      );
+    }
+
     countdownIntervalRef.current = window.setInterval(() => {
       const remaining = Math.max(0, Math.ceil((startsAt - Date.now()) / 1000));
       setRemainingPrepSeconds(remaining);
@@ -203,22 +282,69 @@ export function TimerPrototypePage() {
       engine.start();
       playStartTone();
       setLastTrigger('Start tone played. Timer is running.');
+
+      if (mode === 'camera' && videoRef.current) {
+        void startFinishDetection(runId, videoRef.current);
+      }
     }, prepSeconds * 1000);
   };
 
   const resetRun = () => {
+    runIdRef.current += 1;
     clearStartDelay();
+    stopDetector();
     engine.reset();
     setPhase('idle');
     setRemainingPrepSeconds(0);
     setActualPrepSeconds(0);
+    setLastDetection(null);
+    setDetectorStatus('Camera finish detection is idle.');
     setLastTrigger('Timer reset');
   };
 
   const manualFinish = () => {
+    stopDetector();
     engine.stop('Manual finish trigger');
     setPhase('finished');
     setLastTrigger('Stopped from finish-line trigger');
+  };
+
+  const startFinishDetection = async (
+    runId: number,
+    video: HTMLVideoElement
+  ) => {
+    const calibration =
+      calibrationRef.current ?? (await calibrationPromiseRef.current);
+
+    if (runIdRef.current !== runId) {
+      return;
+    }
+
+    if (!calibration) {
+      setDetectorStatus('No calibration available. Use manual finish trigger.');
+      return;
+    }
+
+    setDetectorStatus('Watching the finish marker for crossing motion.');
+    getDetector().start({
+      video,
+      calibration,
+      onCross: (result) => {
+        if (runIdRef.current !== runId) {
+          return;
+        }
+
+        setLastDetection(result);
+        setDetectorStatus(
+          `Finish detected: motion ${result.detectedMotion}, threshold ${result.threshold}.`
+        );
+        engine.stop('Automatic finish-line detection');
+        setPhase('finished');
+        setLastTrigger(
+          `Auto-stopped at ${formatSeconds(elapsedRef.current)} from finish-line motion.`
+        );
+      }
+    });
   };
 
   return (
@@ -324,12 +450,20 @@ export function TimerPrototypePage() {
             <div className="grid gap-3 md:grid-cols-2">
               <button
                 type="button"
+                disabled={!canStart}
                 className={`rounded-2xl border p-4 text-left transition-colors ${
                   mode === 'manual'
                     ? 'border-primary/50 bg-primary/10'
                     : 'border-white/10 bg-white/[0.03]'
                 }`}
-                onClick={() => setMode('manual')}
+                onClick={() => {
+                  stopDetector();
+                  setMode('manual');
+                  setCameraState('idle');
+                  setDetectorStatus(
+                    'Manual mode selected. Use the finish trigger button to stop.'
+                  );
+                }}
               >
                 <p className="font-medium text-white">Manual prototype</p>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -339,6 +473,7 @@ export function TimerPrototypePage() {
               </button>
               <button
                 type="button"
+                disabled={!canStart}
                 className={`rounded-2xl border p-4 text-left transition-colors ${
                   mode === 'camera'
                     ? 'border-primary/50 bg-primary/10'
@@ -348,6 +483,7 @@ export function TimerPrototypePage() {
                   setMode('camera');
                   setCameraState('requesting');
                   setCameraState('granted');
+                  setDetectorStatus('Camera mode selected. Waiting for preview.');
                 }}
               >
                 <p className="font-medium text-white">Camera preview</p>
@@ -382,7 +518,7 @@ export function TimerPrototypePage() {
                       Simulated finish-lane preview
                     </p>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Use manual trigger for this first iteration.
+                      Switch to camera mode to enable automatic finish detection.
                     </p>
                   </div>
                 </div>
@@ -395,6 +531,13 @@ export function TimerPrototypePage() {
               </div>
             </div>
             <p className="mt-4 text-sm text-muted-foreground">{lastTrigger}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{detectorStatus}</p>
+            {lastDetection ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Last detection: marker {lastDetection.markerPosition}, threshold{' '}
+                {lastDetection.threshold}, motion {lastDetection.detectedMotion}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -439,7 +582,11 @@ export function TimerPrototypePage() {
                   time: Number(elapsed.toFixed(2)),
                   notes: `Captured from timer prototype after a ${actualPrepSeconds || 'manual'} second setup delay`,
                   videoReference:
-                    mode === 'camera' ? 'camera-prototype-capture' : 'manual-prototype'
+                    mode === 'camera' ? 'camera-prototype-capture' : 'manual-prototype',
+                  captureMode: mode,
+                  detectionMethod: lastDetection ? 'motion-band' : undefined,
+                  detectionMarkerPosition: lastDetection?.markerPosition,
+                  detectionThreshold: lastDetection?.threshold
                 });
                 setLastTrigger(`Saved ${formatSeconds(elapsed)} to ${latestSession.title}`);
               }}
