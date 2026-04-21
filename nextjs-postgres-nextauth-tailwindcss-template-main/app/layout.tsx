@@ -3,6 +3,8 @@ import './globals.css';
 import { Analytics } from '@vercel/analytics/react';
 import { Barlow_Condensed, Inter } from 'next/font/google';
 
+import { IntroSplash } from '@/components/intro-splash';
+
 const headingFont = Barlow_Condensed({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
@@ -15,9 +17,8 @@ const bodyFont = Inter({
 });
 
 export const metadata = {
-  title: 'Sprint Tracker',
-  description:
-    'A local-first sprint tracking dashboard for sessions, attempts, charts, timer prototypes, and room scaffolding.'
+  title: 'DESA Sprint Console',
+  description: 'A polished sprint timer and finish-line camera console.'
 };
 
 export default function RootLayout({
@@ -30,9 +31,10 @@ export default function RootLayout({
       <body
         className={`${headingFont.variable} ${bodyFont.variable} flex min-h-screen w-full flex-col bg-background font-sans text-foreground antialiased`}
       >
+        <IntroSplash />
         {children}
+        <Analytics />
       </body>
-      <Analytics />
     </html>
   );
 }
