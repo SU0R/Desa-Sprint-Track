@@ -21,7 +21,7 @@ type TimerPhase = 'idle' | 'countdown' | 'cue' | 'running' | 'finished';
 
 const FINISH_MARKER_POSITION = 0.72;
 const START_CUE_SRC = '/sounds/start-cue.mp4';
-const START_CUE_GUN_OFFSET_MS = 4300;
+const START_CUE_GUN_OFFSET_MS = 4150;
 
 const PREP_OPTIONS: Array<{
   value: PrepOption;
@@ -312,7 +312,7 @@ export function TimerPrototypePage() {
       setRemainingPrepSeconds(0);
       playStartCue();
       setLastTrigger(
-        'Start cue playing. Timer will start on the gunshot in 4.3 seconds.'
+        'Start cue playing. Timer will start on the gunshot in 4.15 seconds.'
       );
 
       gunStartTimeoutRef.current = window.setTimeout(() => {
