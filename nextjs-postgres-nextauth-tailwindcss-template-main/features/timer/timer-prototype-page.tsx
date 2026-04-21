@@ -11,11 +11,53 @@ import { createBrowserCameraService } from '@/services/camera/camera-service';
 import { BasicTimingEngine } from '@/services/timing/timing-engine';
 import { formatSeconds } from '@/lib/format';
 
+type PrepOption = '10' | '20' | '30' | '40' | 'random-30-40';
+type TimerPhase = 'idle' | 'countdown' | 'running' | 'finished';
+
+const PREP_OPTIONS: Array<{
+  value: PrepOption;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: '10',
+    label: '10 seconds',
+    description: 'Quick reset when someone else is holding the camera.'
+  },
+  {
+    value: '20',
+    label: '20 seconds',
+    description: 'Original setup delay.'
+  },
+  {
+    value: '30',
+    label: '30 seconds',
+    description: 'More time to set the phone down and get in position.'
+  },
+  {
+    value: '40',
+    label: '40 seconds',
+    description: 'Longest fixed setup delay.'
+  },
+  {
+    value: 'random-30-40',
+    label: 'Random 30-40 seconds',
+    description: 'Best first-test mode because you cannot count down the start.'
+  }
+];
+
 export function TimerPrototypePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const startTimeoutRef = useRef<number | null>(null);
+  const countdownIntervalRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const [status, setStatus] = useState('Idle');
   const [elapsed, setElapsed] = useState(0);
   const [mode, setMode] = useState<'manual' | 'camera'>('manual');
+  const [phase, setPhase] = useState<TimerPhase>('idle');
+  const [prepOption, setPrepOption] = useState<PrepOption>('random-30-40');
+  const [remainingPrepSeconds, setRemainingPrepSeconds] = useState(0);
+  const [actualPrepSeconds, setActualPrepSeconds] = useState(0);
   const [cameraState, setCameraState] = useState<
     'idle' | 'requesting' | 'granted' | 'blocked'
   >('idle');
@@ -25,12 +67,67 @@ export function TimerPrototypePage() {
   const latestSession = sessions[0];
   const engine = useMemo(() => new BasicTimingEngine(), []);
 
+  function clearStartDelay() {
+    if (startTimeoutRef.current !== null) {
+      window.clearTimeout(startTimeoutRef.current);
+      startTimeoutRef.current = null;
+    }
+
+    if (countdownIntervalRef.current !== null) {
+      window.clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  }
+
+  function primeStartTone() {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+
+    void audioContextRef.current.resume();
+  }
+
+  function playStartTone() {
+    const context = audioContextRef.current;
+    if (!context) {
+      return;
+    }
+
+    const now = context.currentTime;
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.7, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.52);
+    gain.connect(context.destination);
+
+    [880, 1320].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.16);
+      oscillator.connect(gain);
+      oscillator.start(now + index * 0.16);
+      oscillator.stop(now + index * 0.16 + 0.22);
+    });
+  }
+
   useEffect(() => {
     return engine.subscribe((snapshot) => {
       setElapsed(snapshot.elapsedMs / 1000);
       setStatus(snapshot.status);
+
+      if (snapshot.status === 'Stopped') {
+        setPhase('finished');
+      }
     });
   }, [engine]);
+
+  useEffect(() => {
+    return () => {
+      clearStartDelay();
+      audioContextRef.current?.close();
+      audioContextRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (cameraState !== 'granted' || !videoRef.current) {
@@ -67,6 +164,63 @@ export function TimerPrototypePage() {
     return () => cleanup();
   }, [cameraState]);
 
+  const selectedPrepOption = PREP_OPTIONS.find(
+    (option) => option.value === prepOption
+  );
+  const isRandomStart = prepOption === 'random-30-40';
+  const canStart = phase !== 'countdown' && phase !== 'running';
+
+  const startRun = () => {
+    clearStartDelay();
+    engine.reset();
+
+    const prepSeconds =
+      prepOption === 'random-30-40'
+        ? getRandomIntegerInclusive(30, 40)
+        : Number(prepOption);
+    const startsAt = Date.now() + prepSeconds * 1000;
+
+    primeStartTone();
+    setPhase('countdown');
+    setActualPrepSeconds(prepSeconds);
+    setRemainingPrepSeconds(prepSeconds);
+    setLastTrigger(
+      isRandomStart
+        ? 'Random start armed. Get set and listen for the start tone.'
+        : `${prepSeconds}-second setup timer started.`
+    );
+
+    countdownIntervalRef.current = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((startsAt - Date.now()) / 1000));
+      setRemainingPrepSeconds(remaining);
+    }, 250);
+
+    startTimeoutRef.current = window.setTimeout(() => {
+      clearStartDelay();
+      setPhase('running');
+      setRemainingPrepSeconds(0);
+      engine.reset();
+      engine.start();
+      playStartTone();
+      setLastTrigger('Start tone played. Timer is running.');
+    }, prepSeconds * 1000);
+  };
+
+  const resetRun = () => {
+    clearStartDelay();
+    engine.reset();
+    setPhase('idle');
+    setRemainingPrepSeconds(0);
+    setActualPrepSeconds(0);
+    setLastTrigger('Timer reset');
+  };
+
+  const manualFinish = () => {
+    engine.stop('Manual finish trigger');
+    setPhase('finished');
+    setLastTrigger('Stopped from finish-line trigger');
+  };
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_0.95fr]">
       <div className="space-y-6">
@@ -80,26 +234,68 @@ export function TimerPrototypePage() {
           <CardContent className="space-y-6">
             <div className="rounded-[28px] border border-white/10 bg-black p-6 text-center">
               <p className="text-xs uppercase tracking-[0.4em] text-muted-foreground">
-                Current time
+                {phase === 'countdown' ? 'Start delay' : 'Current time'}
               </p>
-              <p className="mt-4 text-6xl font-semibold text-white md:text-7xl">
-                {formatSeconds(elapsed)}
-              </p>
+              {phase === 'countdown' ? (
+                isRandomStart ? (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-4xl font-semibold text-white md:text-5xl">
+                      Listen for the tone
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Random start window: 30-40 seconds
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-6xl font-semibold text-white md:text-7xl">
+                    {remainingPrepSeconds}s
+                  </p>
+                )
+              ) : (
+                <p className="mt-4 text-6xl font-semibold text-white md:text-7xl">
+                  {formatSeconds(elapsed)}
+                </p>
+              )}
               <p className="mt-2 text-sm text-muted-foreground">{status}</p>
             </div>
 
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <label
+                htmlFor="prep-delay"
+                className="text-sm font-medium text-white"
+              >
+                Setup delay before timer starts
+              </label>
+              <select
+                id="prep-delay"
+                value={prepOption}
+                disabled={phase === 'countdown' || phase === 'running'}
+                onChange={(event) => setPrepOption(event.target.value as PrepOption)}
+                className="mt-3 h-11 w-full rounded-md border border-white/10 bg-background px-3 text-sm text-white outline-none focus:ring-2 focus:ring-primary"
+              >
+                {PREP_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {phase === 'countdown' && isRandomStart
+                  ? 'The exact start time is hidden. Wait for the tone.'
+                  : selectedPrepOption?.description}
+              </p>
+            </div>
+
             <div className="flex flex-wrap gap-3">
-              <Button onClick={() => engine.start()}>
+              <Button disabled={!canStart} onClick={startRun}>
                 <Play className="mr-2 h-4 w-4" />
                 Start
               </Button>
               <Button
                 variant="outline"
                 className="border-white/10 bg-white/[0.04]"
-                onClick={() => {
-                  engine.stop('Manual finish trigger');
-                  setLastTrigger('Stopped from finish-line trigger');
-                }}
+                disabled={phase !== 'running'}
+                onClick={manualFinish}
               >
                 <Square className="mr-2 h-4 w-4" />
                 Trigger finish line
@@ -107,13 +303,21 @@ export function TimerPrototypePage() {
               <Button
                 variant="outline"
                 className="border-white/10 bg-white/[0.04]"
-                onClick={() => {
-                  engine.reset();
-                  setLastTrigger('Timer reset');
-                }}
+                onClick={resetRun}
               >
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Reset
+              </Button>
+              <Button
+                variant="outline"
+                className="border-white/10 bg-white/[0.04]"
+                onClick={() => {
+                  primeStartTone();
+                  playStartTone();
+                  setLastTrigger('Start tone preview played.');
+                }}
+              >
+                Test start tone
               </Button>
             </div>
 
@@ -233,7 +437,7 @@ export function TimerPrototypePage() {
                 addAttempt(latestSession.id, {
                   eventType: '40-yard dash',
                   time: Number(elapsed.toFixed(2)),
-                  notes: 'Captured from timer prototype',
+                  notes: `Captured from timer prototype after a ${actualPrepSeconds || 'manual'} second setup delay`,
                   videoReference:
                     mode === 'camera' ? 'camera-prototype-capture' : 'manual-prototype'
                 });
@@ -247,4 +451,8 @@ export function TimerPrototypePage() {
       </div>
     </div>
   );
+}
+
+function getRandomIntegerInclusive(min: number, max: number) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
