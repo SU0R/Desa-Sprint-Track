@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useSprintTrackerStore } from '@/hooks/use-sprint-tracker-store';
 import { createBrowserCameraService } from '@/services/camera/camera-service';
 import {
-  MotionBandFinishLineDetector,
+  PoseFinishLineDetector,
   type FinishLineCalibration,
   type FinishLineDetectionResult
 } from '@/services/camera/finish-line-detector';
@@ -20,6 +20,7 @@ type PrepOption = '10' | '20' | '30' | '40' | 'random-30-40';
 type TimerPhase = 'idle' | 'countdown' | 'running' | 'finished';
 
 const FINISH_MARKER_POSITION = 0.72;
+const START_CUE_SRC = '/sounds/start-cue.mp4';
 
 const PREP_OPTIONS: Array<{
   value: PrepOption;
@@ -57,8 +58,9 @@ export function TimerPrototypePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const startTimeoutRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
+  const startCueRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const detectorRef = useRef<MotionBandFinishLineDetector | null>(null);
+  const detectorRef = useRef<PoseFinishLineDetector | null>(null);
   const calibrationRef = useRef<FinishLineCalibration | null>(null);
   const calibrationPromiseRef = useRef<Promise<FinishLineCalibration | null> | null>(
     null
@@ -100,10 +102,9 @@ export function TimerPrototypePage() {
 
   function getDetector() {
     if (!detectorRef.current) {
-      detectorRef.current = new MotionBandFinishLineDetector({
+      detectorRef.current = new PoseFinishLineDetector({
         markerPosition: FINISH_MARKER_POSITION,
-        sampleIntervalMs: 45,
-        consecutiveDetections: 2
+        sampleIntervalMs: 45
       });
     }
 
@@ -116,7 +117,19 @@ export function TimerPrototypePage() {
     calibrationPromiseRef.current = null;
   }
 
-  function primeStartTone() {
+  function getStartCue() {
+    if (!startCueRef.current) {
+      const cue = new Audio(START_CUE_SRC);
+      cue.preload = 'auto';
+      startCueRef.current = cue;
+    }
+
+    return startCueRef.current;
+  }
+
+  function primeStartCue() {
+    getStartCue().load();
+
     if (!audioContextRef.current) {
       audioContextRef.current = new AudioContext();
     }
@@ -124,7 +137,15 @@ export function TimerPrototypePage() {
     void audioContextRef.current.resume();
   }
 
-  function playStartTone() {
+  function playStartCue() {
+    const cue = getStartCue();
+    cue.currentTime = 0;
+    void cue.play().catch(() => {
+      playGeneratedStartTone();
+    });
+  }
+
+  function playGeneratedStartTone() {
     const context = audioContextRef.current;
     if (!context) {
       return;
@@ -164,6 +185,7 @@ export function TimerPrototypePage() {
       runIdRef.current += 1;
       clearStartDelay();
       stopDetector();
+      startCueRef.current?.pause();
       audioContextRef.current?.close();
       audioContextRef.current = null;
     };
@@ -224,7 +246,7 @@ export function TimerPrototypePage() {
         : Number(prepOption);
     const startsAt = Date.now() + prepSeconds * 1000;
 
-    primeStartTone();
+    primeStartCue();
     setPhase('countdown');
     setActualPrepSeconds(prepSeconds);
     setRemainingPrepSeconds(prepSeconds);
@@ -240,9 +262,9 @@ export function TimerPrototypePage() {
         Math.max(1500, prepSeconds * 1000 - 1000)
       );
 
-      setDetectorStatus('Calibrating finish-line motion during setup.');
+      setDetectorStatus('Loading pose model and calibrating fallback motion.');
       calibrationPromiseRef.current = getDetector()
-        .calibrate(videoRef.current, calibrationDuration)
+        .calibrate(videoRef.current, calibrationDuration, setDetectorStatus)
         .then((calibration) => {
           if (runIdRef.current !== runId) {
             return null;
@@ -250,7 +272,9 @@ export function TimerPrototypePage() {
 
           calibrationRef.current = calibration;
           setDetectorStatus(
-            `Ready: threshold ${calibration.threshold} from ${calibration.samples} samples.`
+            calibration.poseReady
+              ? `Pose ready. Fallback threshold ${calibration.threshold} from ${calibration.samples} samples.`
+              : `Pose unavailable. Fallback threshold ${calibration.threshold} from ${calibration.samples} samples.`
           );
           return calibration;
         })
@@ -280,8 +304,8 @@ export function TimerPrototypePage() {
       setRemainingPrepSeconds(0);
       engine.reset();
       engine.start();
-      playStartTone();
-      setLastTrigger('Start tone played. Timer is running.');
+      playStartCue();
+      setLastTrigger('Start cue played. Timer is running.');
 
       if (mode === 'camera' && videoRef.current) {
         void startFinishDetection(runId, videoRef.current);
@@ -325,10 +349,11 @@ export function TimerPrototypePage() {
       return;
     }
 
-    setDetectorStatus('Watching the finish marker for crossing motion.');
+    setDetectorStatus('Watching torso center for finish-line crossing.');
     getDetector().start({
       video,
       calibration,
+      onStatus: setDetectorStatus,
       onCross: (result) => {
         if (runIdRef.current !== runId) {
           return;
@@ -336,7 +361,9 @@ export function TimerPrototypePage() {
 
         setLastDetection(result);
         setDetectorStatus(
-          `Finish detected: motion ${result.detectedMotion}, threshold ${result.threshold}.`
+          result.method === 'pose-landmarker'
+            ? `Finish detected by torso crossing at x=${result.torsoX} with ${result.confidence} confidence.`
+            : `Pose unavailable; fallback motion ${result.fallbackMotion} crossed threshold ${result.threshold}.`
         );
         engine.stop('Automatic finish-line detection');
         setPhase('finished');
@@ -438,12 +465,12 @@ export function TimerPrototypePage() {
                 variant="outline"
                 className="border-white/10 bg-white/[0.04]"
                 onClick={() => {
-                  primeStartTone();
-                  playStartTone();
-                  setLastTrigger('Start tone preview played.');
+                  primeStartCue();
+                  playStartCue();
+                  setLastTrigger('Start cue preview played.');
                 }}
               >
-                Test start tone
+                Test start cue
               </Button>
             </div>
 
@@ -534,8 +561,9 @@ export function TimerPrototypePage() {
             <p className="mt-2 text-sm text-muted-foreground">{detectorStatus}</p>
             {lastDetection ? (
               <p className="mt-2 text-xs text-muted-foreground">
-                Last detection: marker {lastDetection.markerPosition}, threshold{' '}
-                {lastDetection.threshold}, motion {lastDetection.detectedMotion}
+                Last detection: {lastDetection.method} using{' '}
+                {lastDetection.landmarkUsed}, marker {lastDetection.markerPosition},
+                confidence {lastDetection.confidence}
               </p>
             ) : null}
           </CardContent>
@@ -584,9 +612,12 @@ export function TimerPrototypePage() {
                   videoReference:
                     mode === 'camera' ? 'camera-prototype-capture' : 'manual-prototype',
                   captureMode: mode,
-                  detectionMethod: lastDetection ? 'motion-band' : undefined,
+                  detectionMethod: lastDetection?.method,
                   detectionMarkerPosition: lastDetection?.markerPosition,
-                  detectionThreshold: lastDetection?.threshold
+                  detectionThreshold: lastDetection?.threshold,
+                  detectionConfidence: lastDetection?.confidence,
+                  detectionLandmark: lastDetection?.landmarkUsed,
+                  detectionTimestampMs: lastDetection?.timestampMs
                 });
                 setLastTrigger(`Saved ${formatSeconds(elapsed)} to ${latestSession.title}`);
               }}

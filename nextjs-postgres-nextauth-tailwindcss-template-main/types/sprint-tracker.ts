@@ -29,9 +29,12 @@ export type Attempt = {
   notes?: string;
   videoReference?: string;
   captureMode?: 'manual' | 'camera';
-  detectionMethod?: 'motion-band';
+  detectionMethod?: 'motion-band' | 'pose-landmarker' | 'motion-fallback';
   detectionMarkerPosition?: number;
   detectionThreshold?: number;
+  detectionConfidence?: number;
+  detectionLandmark?: string;
+  detectionTimestampMs?: number;
 };
 
 export type Room = {

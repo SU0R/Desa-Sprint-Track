@@ -44,6 +44,9 @@ type StoreContextValue = {
       detectionMethod?: Attempt['detectionMethod'];
       detectionMarkerPosition?: Attempt['detectionMarkerPosition'];
       detectionThreshold?: Attempt['detectionThreshold'];
+      detectionConfidence?: Attempt['detectionConfidence'];
+      detectionLandmark?: Attempt['detectionLandmark'];
+      detectionTimestampMs?: Attempt['detectionTimestampMs'];
     }
   ) => Attempt;
   createRoom: (name: string) => Room;
@@ -115,7 +118,10 @@ export function SprintTrackerProvider({ children }: { children: ReactNode }) {
           captureMode: input.captureMode,
           detectionMethod: input.detectionMethod,
           detectionMarkerPosition: input.detectionMarkerPosition,
-          detectionThreshold: input.detectionThreshold
+          detectionThreshold: input.detectionThreshold,
+          detectionConfidence: input.detectionConfidence,
+          detectionLandmark: input.detectionLandmark,
+          detectionTimestampMs: input.detectionTimestampMs
         };
 
         updateData((current) => ({
