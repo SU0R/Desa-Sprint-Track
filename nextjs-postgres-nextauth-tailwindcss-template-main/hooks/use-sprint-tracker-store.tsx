@@ -40,6 +40,10 @@ type StoreContextValue = {
       time: number;
       notes?: string;
       videoReference?: string;
+      captureMode?: Attempt['captureMode'];
+      detectionMethod?: Attempt['detectionMethod'];
+      detectionMarkerPosition?: Attempt['detectionMarkerPosition'];
+      detectionThreshold?: Attempt['detectionThreshold'];
     }
   ) => Attempt;
   createRoom: (name: string) => Room;
@@ -107,7 +111,11 @@ export function SprintTrackerProvider({ children }: { children: ReactNode }) {
           time: input.time,
           createdAt: new Date().toISOString(),
           notes: input.notes?.trim() || undefined,
-          videoReference: input.videoReference?.trim() || undefined
+          videoReference: input.videoReference?.trim() || undefined,
+          captureMode: input.captureMode,
+          detectionMethod: input.detectionMethod,
+          detectionMarkerPosition: input.detectionMarkerPosition,
+          detectionThreshold: input.detectionThreshold
         };
 
         updateData((current) => ({

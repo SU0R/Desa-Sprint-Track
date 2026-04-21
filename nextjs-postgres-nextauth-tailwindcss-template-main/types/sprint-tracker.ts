@@ -28,6 +28,10 @@ export type Attempt = {
   createdAt: string;
   notes?: string;
   videoReference?: string;
+  captureMode?: 'manual' | 'camera';
+  detectionMethod?: 'motion-band';
+  detectionMarkerPosition?: number;
+  detectionThreshold?: number;
 };
 
 export type Room = {
